@@ -19,15 +19,18 @@ Open `http://localhost:8080`. A double-click on `index.html` also works in curre
 - `W` / `S` or `Up` / `Down` — throttle and brake
 - `A` / `D` or `Left` / `Right` — lane
 - `Space` — eat the queued food (or the one you just grabbed, if the slot is empty it fires on pickup)
+- `H` — horn
 - `R` — restart after a wreck
 - Click the page once so the Web Audio engine can start
+
+Ten other vehicles share the loop (hire cars and maxi-taxis). They drift lanes, pull aside if you sit on their bumper, and horn if you dive past. Clipping one scrapes chassis unless the buss-up-shut is up. Aloo pie still hops potholes, not traffic.
 
 ## Stack
 
 - Three.js r164 via jsDelivr import map
 - WebGLRenderer, procedural ribbon road on a closed `CatmullRomCurve3`
 - Custom kinematic car (speed, lateral offset, chassis). No Cannon, Rapier, or ammo.js
-- Web Audio oscillators for the engine and the pickup blip
+- Web Audio: twin-oscillator engine, plus noise and tone hits for pothole, trap chirp, pickup, eat, shield, horn, scrape, and wreck
 - `localStorage` key `potholeSeasonBest` for the best score
 
 ## Food

@@ -62,8 +62,8 @@
 <div id="overlay">
   <div class="card">
     <h1>POTHOLE <span>SEASON</span></h1>
-    <p>Coast road. Rain last night, so the patches are hungry. Speed traps sit on the straight bits. Food on the verge is the only legal advantage.</p>
-    <p><kbd>W</kbd> <kbd>S</kbd> throttle · <kbd>A</kbd> <kbd>D</kbd> lane · <kbd>Space</kbd> eat the food in the slot · <kbd>R</kbd> restart</p>
+    <p>Coast road. Rain last night, so the patches are hungry. Speed traps sit on the straight bits. Maxi-taxis and hire cars own the lanes. Food on the verge is the only legal advantage.</p>
+    <p><kbd>W</kbd> <kbd>S</kbd> throttle · <kbd>A</kbd> <kbd>D</kbd> lane · <kbd>Space</kbd> eat · <kbd>H</kbd> horn · <kbd>R</kbd> restart</p>
     <button id="go" type="button">PULL OUT</button>
   </div>
 </div>
@@ -275,38 +275,113 @@ stripe.position.y=0.42;
 car.add(stripe);
 scene.add(car);
 
+const PAINT = ['#f2c14e','#f4f1e8','#1d4e89','#e23b4a','#2f8f4a','#f27d16','#16343a','#c9a227','#d4145a','#8fd3c8'];
+function makeTraffic(color, kind){
+  const g = new THREE.Group();
+  const long = kind==='maxi'?4.4:3.0;
+  const wide = kind==='maxi'?1.85:1.45;
+  const tall = kind==='maxi'?1.15:0.48;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(wide, tall, long), new THREE.MeshStandardMaterial({color, metalness:0.15, roughness:0.5}));
+  body.position.y = kind==='maxi'?0.95:0.55;
+  body.castShadow = true;
+  g.add(body);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(wide*0.86, kind==='maxi'?0.7:0.4, kind==='maxi'?2.2:1.2), new THREE.MeshStandardMaterial({color:'#10262c'}));
+  cab.position.set(0, body.position.y+tall*0.45, kind==='maxi'?0.2:-0.15);
+  g.add(cab);
+  if(kind==='maxi'){
+    const band = new THREE.Mesh(new THREE.BoxGeometry(wide+0.04, 0.16, long+0.04), new THREE.MeshStandardMaterial({color:'#1a1406'}));
+    band.position.y = 0.72;
+    g.add(band);
+  }
+  scene.add(g);
+  return g;
+}
+const traffic = [];
+for(let i=0;i<10;i++){
+  const kind = i%3===0 ? 'maxi' : 'car';
+  const mesh = makeTraffic(PAINT[i%PAINT.length], kind);
+  traffic.push({
+    mesh, kind,
+    s: 40 + i*(trackLen/10),
+    lat: (i%2?1:-1) * (1.1 + (i%3)*0.6),
+    speed: kind==='maxi'?16+rnd()*4:20+rnd()*6,
+    lane: 0,
+    horn: 0,
+    bump: 0
+  });
+}
+function resetTraffic(){
+  traffic.forEach((c,i)=>{
+    c.s = 50 + i*(trackLen/10);
+    c.lat = (i%2?1:-1) * (1.1 + (i%3)*0.6);
+    c.bump = 0;
+  });
+}
+
 const keys={};
 addEventListener('keydown',e=>{
   keys[e.key.toLowerCase()]=true;
   if([' ','arrowup','arrowdown'].includes(e.key.toLowerCase())) e.preventDefault();
   if(e.key===' ' && running) eat();
+  if(e.key.toLowerCase()==='h' && running) horn();
   if(e.key.toLowerCase()==='r' && wrecked) restart();
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
 
-let actx, eng;
+let actx, eng, master, noiseBuf;
 function audio(){
   if(actx) return;
   actx=new (window.AudioContext||window.webkitAudioContext)();
-  const o=actx.createOscillator();
-  const f=actx.createBiquadFilter();
-  const g=actx.createGain();
-  o.type='sawtooth'; o.frequency.value=50;
-  f.type='lowpass'; f.frequency.value=240;
+  master=actx.createGain();
+  master.gain.value=0.85;
+  master.connect(actx.destination);
+  const len=actx.sampleRate*2;
+  noiseBuf=actx.createBuffer(1, len, actx.sampleRate);
+  const data=noiseBuf.getChannelData(0);
+  for(let i=0;i<len;i++) data[i]=Math.random()*2-1;
+  const o1=actx.createOscillator(), o2=actx.createOscillator();
+  const f=actx.createBiquadFilter(), g=actx.createGain();
+  o1.type='sawtooth'; o2.type='square';
+  o1.frequency.value=48; o2.frequency.value=24;
+  f.type='lowpass'; f.frequency.value=280;
   g.gain.value=0.0001;
-  o.connect(f); f.connect(g); g.connect(actx.destination);
-  o.start();
-  eng={o,f,g};
+  o1.connect(f); o2.connect(f); f.connect(g); g.connect(master);
+  o1.start(); o2.start();
+  eng={o1,o2,f,g};
 }
-function blip(freq){
+function tone(freq, dur, type, vol, slide){
   if(!actx) return;
   const o=actx.createOscillator(), g=actx.createGain();
-  o.frequency.value=freq; g.gain.value=0.08;
-  o.connect(g); g.connect(actx.destination);
-  o.start();
-  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+0.18);
-  o.stop(actx.currentTime+0.2);
+  o.type=type||'square';
+  o.frequency.setValueAtTime(freq, actx.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, slide), actx.currentTime+dur);
+  g.gain.setValueAtTime(vol||0.08, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+dur);
+  o.connect(g); g.connect(master);
+  o.start(); o.stop(actx.currentTime+dur+0.02);
 }
+function noise(dur, vol, freq, type){
+  if(!actx) return;
+  const src=actx.createBufferSource();
+  src.buffer=noiseBuf;
+  const f=actx.createBiquadFilter();
+  f.type=type||'lowpass';
+  f.frequency.value=freq||400;
+  const g=actx.createGain();
+  g.gain.setValueAtTime(vol||0.15, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+dur);
+  src.connect(f); f.connect(g); g.connect(master);
+  src.start(); src.stop(actx.currentTime+dur+0.02);
+}
+function sfxPothole(){ noise(0.28, 0.35, 180, 'lowpass'); tone(90, 0.22, 'sine', 0.16, 40); }
+function sfxTrap(){ tone(880, 0.12, 'square', 0.07); setTimeout(()=>tone(660, 0.18, 'square', 0.07), 90); }
+function sfxPickup(){ tone(520, 0.08, 'square', 0.06); setTimeout(()=>tone(780, 0.1, 'square', 0.06), 70); }
+function sfxEat(){ noise(0.2, 0.12, 900, 'bandpass'); tone(340, 0.16, 'sawtooth', 0.05, 720); }
+function sfxShield(){ tone(480, 0.1, 'triangle', 0.07); tone(720, 0.14, 'triangle', 0.05); }
+function sfxHorn(){ tone(392, 0.18, 'square', 0.07); tone(311, 0.22, 'sawtooth', 0.04); }
+function sfxScrape(){ noise(0.25, 0.28, 1400, 'bandpass'); tone(140, 0.16, 'sine', 0.08, 70); }
+function sfxCrash(){ noise(0.55, 0.45, 240, 'lowpass'); tone(160, 0.4, 'sawtooth', 0.1, 50); }
+function horn(){ if(!actx) return; sfxHorn(); }
 
 const P0=()=>({s:20,lat:0,speed:22,chassis:100,fines:0,score:0,shield:0,hop:0,gripT:0,regen:0,jam:0,immune:0,magnet:0,multT:0,boost:0,surge:0,slot:null,flash:0});
 let P=P0();
@@ -322,7 +397,7 @@ function eat(){
   if(!P.slot) return;
   P.slot.apply(P);
   say(P.slot.name.toUpperCase());
-  blip(520);
+  sfxEat();
   P.slot=null;
 }
 function restart(){
@@ -330,8 +405,10 @@ function restart(){
   wrecked=false;
   running=true;
   $('overlay').classList.add('hide');
+  $('overlay').querySelector('h1').innerHTML='POTHOLE <span>SEASON</span>';
   hazards.forEach(h=>{if(h.kind==='hole'){h.live=true;h.mesh.visible=true;}});
   pickups.forEach(p=>{p.live=true;p.mesh.visible=true;});
+  resetTraffic();
 }
 
 function near(a,b,window){
@@ -367,22 +444,51 @@ function tick(now){
     camera.lookAt(car.position.clone().addScaledVector(f.t,8).setY(1.2));
 
     if(eng){
-      eng.o.frequency.setTargetAtTime(42+P.speed*1.4, actx.currentTime, 0.1);
-      eng.g.gain.setTargetAtTime(0.015+P.speed*0.0004, actx.currentTime, 0.1);
+      const boost = (P.boost>0||P.surge>0) ? 1.35 : 1;
+      eng.o1.frequency.setTargetAtTime((42+P.speed*1.5)*boost, actx.currentTime, 0.08);
+      eng.o2.frequency.setTargetAtTime((21+P.speed*0.7)*boost, actx.currentTime, 0.08);
+      eng.f.frequency.setTargetAtTime(220+P.speed*6, actx.currentTime, 0.1);
+      eng.g.gain.setTargetAtTime(0.02+P.speed*0.00055, actx.currentTime, 0.08);
+    }
+
+    for(const c of traffic){
+      c.horn=Math.max(0, c.horn-dt);
+      c.bump=Math.max(0, c.bump-dt);
+      c.s += c.speed*dt;
+      c.lat += (c.lane-c.lat)*dt*1.6;
+      if(Math.random()<dt*0.35) c.lane = (Math.random()*2-1)*2.4;
+      for(const o of traffic){
+        if(o===c) continue;
+        if(near(c.s, o.s, 6) && Math.abs(c.lat-o.lat)<1.6) c.lane = c.lat>0?-2.2:2.2;
+      }
+      const ahead = ((c.s-P.s)%trackLen+trackLen)%trackLen;
+      if(ahead<14 && ahead>0 && Math.abs(c.lat-P.lat)<1.4) c.lane = P.lat>0?-2.3:2.3;
+      const cf=frameAt(c.s);
+      c.mesh.position.copy(cf.p).addScaledVector(cf.n, c.lat).setY(0.12);
+      c.mesh.lookAt(c.mesh.position.clone().add(cf.t));
+      if(c.bump<=0 && near(P.s, c.s, c.kind==='maxi'?2.4:1.8) && Math.abs(P.lat-c.lat)<(c.kind==='maxi'?1.5:1.2) && P.hop<=0){
+        c.bump=1.1;
+        P.flash=0.4;
+        if(P.shield>0){ P.shield--; say('SHIELD HELD'); sfxShield(); }
+        else { P.chassis-=12; P.speed*=0.62; say(c.kind==='maxi'?'MAXI':'TRAFFIC'); sfxScrape(); }
+        if(c.horn<=0){ sfxHorn(); c.horn=1.4; }
+      } else if(c.horn<=0 && near(P.s, c.s, 5) && Math.abs(P.lat-c.lat)<1.3 && P.speed>c.speed+6){
+        sfxHorn(); c.horn=2.2;
+      }
     }
 
     for(const h of hazards){
       if(!h.live) continue;
       if(h.kind==='hole' && near(P.s,h.s,1.3) && Math.abs(P.lat-h.lat)<1.15 && P.hop<=0){
         h.live=false; h.mesh.visible=false;
-        if(P.shield>0){P.shield--; say('SHIELD HELD');}
-        else {P.chassis-=18; P.speed*=0.55; say('POTHOLE'); blip(90);}
+        if(P.shield>0){P.shield--; say('SHIELD HELD'); sfxShield();}
+        else {P.chassis-=18; P.speed*=0.55; say('POTHOLE'); sfxPothole();}
       }
       if(h.kind==='trap' && near(P.s,h.s,h.len) && P.flash<=0){
         const kmh=P.speed*3.2;
         if(kmh>LIMIT && P.jam<=0 && P.immune<=0){
-          if(P.shield>0){P.shield--; say('SHIELD ATE THE FINE');}
-          else {P.fines=Math.min(100,P.fines+22); P.score=Math.max(0,P.score-40); P.speed*=0.7; say('SPEED TRAP'); blip(140);}
+          if(P.shield>0){P.shield--; say('SHIELD ATE THE FINE'); sfxShield();}
+          else {P.fines=Math.min(100,P.fines+22); P.score=Math.max(0,P.score-40); P.speed*=0.7; say('SPEED TRAP'); sfxTrap();}
           P.flash=1.6;
         }
       }
@@ -401,12 +507,14 @@ function tick(now){
       }
       if(near(P.s,p.s,reach) && Math.abs(P.lat-p.lat)<reach){
         p.live=false; p.mesh.visible=false;
-        if(!P.slot) P.slot=p.food; else {p.food.apply(P); say(p.food.name.toUpperCase());}
-        blip(640);
+        if(!P.slot) P.slot=p.food; else {p.food.apply(P); say(p.food.name.toUpperCase()); sfxEat();}
+        sfxPickup();
       }
     }
     if(P.chassis<=0 || P.fines>=100){
       wrecked=true; running=false;
+      sfxCrash();
+      if(eng) eng.g.gain.setTargetAtTime(0.0001, actx.currentTime, 0.05);
       $('overlay').classList.remove('hide');
       $('overlay').querySelector('h1').innerHTML = P.chassis<=0 ? 'AXLE <span>GONE</span>' : 'LICENCE <span>GONE</span>';
       $('overlay').querySelector('p').textContent = 'Score '+Math.floor(P.score)+'. R to pull out again.';
